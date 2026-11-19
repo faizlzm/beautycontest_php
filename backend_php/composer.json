@@ -1,0 +1,16 @@
+{
+  "name": "beautycontest/php-backend",
+  "description": "Beauty Contest multiplayer WebSocket server in PHP",
+  "type": "project",
+  "require": {
+    "php": ">=8.1",
+    "cboden/ratchet": "^0.4.4"
+  },
+  "autoload": {
+    "files": [
+      "config.php",
+      "game_logic.php",
+      "room_manager.php"
+    ]
+  }
+}

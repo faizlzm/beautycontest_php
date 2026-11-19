@@ -1,6 +1,8 @@
-# Beauty Contest (Web)
+# Beauty Contest (Web) — PHP version
 
 A real-time, web-based implementation of the **Beauty Contest** game (guess 2/3 of the average). Play solo against bots or multiplayer with friends in a room.
+
+This branch is a functionally equivalent port of the original Python/FastAPI backend to **PHP** so it can be deployed as a PHP project, while keeping the same React frontend and gameplay behavior.
 
 ## How to Play
 
@@ -24,37 +26,68 @@ A real-time, web-based implementation of the **Beauty Contest** game (guess 2/3 
 
 ## Project Structure
 
-- `backend/` — FastAPI + WebSockets server (game/room logic).
-  - `main.py` — WebSocket API (`/ws`) and message handling.
-  - `room_manager.py` — rooms, sessions, round flow.
-  - `game_logic.py` — core Beauty Contest rules and scoring.
-  - `config.py` — game constants.
+- `backend_php/` — PHP WebSocket server (Ratchet/ReactPHP) and game logic.
+  - `server.php` — WebSocket server, message handling, and timers (pick timeout / ready auto-next).
+  - `room_manager.php` — rooms, sessions, round flow, and state snapshots.
+  - `game_logic.php` — core Beauty Contest rules and scoring.
+  - `config.php` — game constants.
+  - `composer.json` — PHP dependencies.
+- `backend/` — original Python backend (kept for reference).
 - `frontend/` — React (Vite) + Tailwind CSS client (`src/App.jsx`, `src/gameLogic.js`).
-- `run.py` — convenience script to start backend and frontend together.
+- `index.php` — PHP front controller to serve the built SPA from `frontend/dist`.
+- `.htaccess` — rewrite rules for SPA routing on Apache/PHP hosts.
+- `run_php.php` — convenience script to start PHP WS backend + PHP static frontend server.
+- `run.py` — original Python/Node convenience script.
 
-## Run Locally
+## Run Locally (PHP)
 
-**Prerequisites:** Python 3 and Node.js/npm.
+**Prerequisites:** PHP 8.1+ with Composer, and Node.js/npm (to build the frontend assets).
 
-Install dependencies once:
-
-```bash
-cd backend && pip install -r requirements.txt
-cd ../frontend && npm install --include=dev
-```
-
-Start everything from the project root:
+### 1. Install PHP backend dependencies
 
 ```bash
-python run.py
+cd backend_php
+composer install
 ```
 
-- Backend: http://localhost:8000
-- Frontend: http://localhost:5173
+### 2. Build the frontend
 
-Open the frontend URL, choose Single Player or Multiplayer, and start playing. Press `Ctrl+C` to stop both.
+```bash
+cd frontend
+npm install --include=dev
+npm run build
+```
 
-## Deployment
+For local use, the frontend defaults to `ws://localhost:8000/ws` when running on localhost. For deployed builds, set `VITE_WS_URL` to your PHP WebSocket endpoint before building (e.g. `wss://<your-ws-host>/ws`):
 
-- `backend/` includes `Procfile` and `render.yaml` for hosting the FastAPI/WebSocket service (e.g. Render).
-- `frontend/` and the root include `vercel.json` for frontend deployment (e.g. Vercel). For deployed builds, set `VITE_WS_URL` to your backend WebSocket endpoint (e.g. `wss://<your-backend>/ws`).
+```bash
+# example
+VITE_WS_URL=wss://your-ws-host/ws npm run build
+```
+
+### 3. Start the PHP servers
+
+From the project root:
+
+```bash
+php run_php.php
+```
+
+- WebSocket backend: `ws://localhost:8000` (accepts `/ws`, same protocol as original)
+- Frontend (built SPA): http://localhost:5173
+
+Open the frontend URL, choose Single Player or Multiplayer, and start playing. Press `Ctrl+C` to stop.
+
+## Deployment (PHP)
+
+- **Frontend/static SPA:** deploy the project on a PHP-capable web server with the document root at the project root (or route all non-file requests to `index.php`). `index.php` serves files from `frontend/dist` with SPA fallback. Ensure `frontend/dist` is built with the correct `VITE_WS_URL`.
+- **WebSocket backend:** run the Ratchet server as a long-running PHP process on a host that supports persistent processes (VPS/container/PaaS with worker support):
+
+  ```bash
+  cd backend_php && composer install
+  php server.php
+  ```
+
+  It listens on port `8000` by default, or the `$PORT` environment variable if provided.
+
+- The WebSocket protocol and game behavior (rules, scoring, timers, history, session rejoin, etc.) match the original implementation. Single-player mode in the UI runs locally in the browser (same as original) and does not require the backend.

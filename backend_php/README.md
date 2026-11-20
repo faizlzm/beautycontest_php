@@ -1,32 +1,57 @@
-# Beauty Contest - PHP Backend (WebSocket)
+# Beauty Contest - PHP Backend (HTTP polling + MySQL)
 
-This is a PHP implementation of the Beauty Contest multiplayer backend, functionally equivalent to the original Python/FastAPI WebSocket server.
+This is the PHP implementation of the Beauty Contest multiplayer backend, designed to run on shared hosting (no long-running WebSocket process). It exposes a stateless JSON HTTP API under `/api` and stores room/game state in MySQL. Game rules and scoring are preserved (see `game_logic.php` / `config.php`, banker's rounding).
 
 ## Requirements
 
 - PHP 8.1+
-- Composer
-- Extensions commonly enabled by default: `json`, `mbstring`, `openssl`, `sockets` (Ratchet uses ReactPHP sockets)
+- MySQL/MariaDB
+- PHP extensions: `pdo_mysql`, `json`, `mbstring`
+- Composer (for autoload/classmap convenience)
 
-## Install
+## Setup
+
+1. Install autoload (optional but recommended):
 
 ```bash
 cd backend_php
 composer install
 ```
 
-## Run
+2. Create a database and import the schema:
 
 ```bash
-php server.php
+mysql -u <user> -p <database> < schema.sql
 ```
 
-By default it listens on port `8000` (or `$PORT` env var) and accepts WebSocket connections on any path (frontend uses `/ws`, e.g. `ws://localhost:8000/ws`).
+3. Configure database access in `config.php` or via environment variables:
 
-## Protocol
+- `DB_HOST` (default `127.0.0.1`)
+- `DB_PORT` (default `3306`)
+- `DB_NAME` (default `beautycontest`)
+- `DB_USER` (default `root`)
+- `DB_PASS` (default empty)
 
-The server speaks the same JSON-over-WebSocket protocol as the original backend:
-- Client -> server: `create_room`, `join_room`, `rejoin_room`, `start_game`, `submit`, `ready_next`, `next_round`, `leave`
-- Server -> client: `joined`, `lobby_update`, `game_started`, `round_start`, `submission_update`, `round_result`, `ready_update`, `state_sync`, `session_invalid`, `error`
+Set `APP_DEBUG=1` to include exception messages in 500 responses (development only).
 
-Game rules, timers (60s pick, 15s ready/auto-next), scoring, and history behavior are preserved.
+## API
+
+Base path: `/api`
+
+- `POST /api/room/create` `{name}` → `{type:"joined", playerId, code, name, isHost, players, singlePlayer}` 
+- `POST /api/room/join` `{name, code}` → joined or error
+- `POST /api/room/rejoin` `{playerId, code}` → `{type:"state_sync", ...}` or `session_invalid`
+- `GET  /api/room/state?code=...&playerId=...` → `state_sync` snapshot (used for polling)
+- `POST /api/game/start` `{code, playerId}` (host)
+- `POST /api/game/submit` `{code, playerId, value}`
+- `POST /api/game/ready` `{code, playerId}`
+- `POST /api/game/leave` `{code, playerId}`
+
+`state_sync` includes `state` (`lobby|playing|result`), `round`, `players`, `submitted`, `history`, `pickCountdown` (playing), and `result` (result, with ready info/countdown and `gameOver/matchWinnerId`).
+
+Timers are deadline-based in the database (60s pick, 15s ready/auto-next) and are evaluated on each state/command request, so polling drives progression without a background worker.
+
+## Notes
+
+- `server.php` and `room_manager.php` are the legacy WebSocket/Ratchet implementation kept for reference; the HTTP+MySQL flow uses `api.php` + `game_service.php` + `db.php`.
+- Single-player mode runs entirely in the browser and does not use this backend.

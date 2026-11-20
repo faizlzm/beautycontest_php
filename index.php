@@ -4,9 +4,15 @@
 // Then deploy this project on a PHP-capable web server with document root at project root,
 // or run: php -S 0.0.0.0:8080 index.php
 
+$uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+// Route API requests when running under PHP's built-in server (no .htaccess)
+if (preg_match('#^/api(?:/|$)#', $uriPath)) {
+    require __DIR__ . '/backend_php/api.php';
+    exit;
+}
+
 $dist = __DIR__ . '/frontend/dist';
-$uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-$uri = rawurldecode($uri);
+$uri = rawurldecode($uriPath);
 
 // Prevent directory traversal
 if (strpos($uri, '..') !== false) {
@@ -58,4 +64,4 @@ http_response_code(503);
 header('Content-Type: text/plain; charset=utf-8');
 echo "Frontend build not found.\n\n";
 echo "Build it with:\n  cd frontend\n  npm install --include=dev\n  npm run build\n\n";
-echo "Then ensure VITE_WS_URL points to your PHP WebSocket server (ws://host:8000 by default path /ws) before building for deployed environments.\n";
+echo "This deployment uses HTTP polling (same-origin /api). Configure the database in backend_php/config.php (or DB_* env vars) and import backend_php/schema.sql for multiplayer.\n";

@@ -1,8 +1,8 @@
-# Beauty Contest (Web) — PHP version
+# Beauty Contest (Web) — PHP (shared-hosting friendly)
 
-A real-time, web-based implementation of the **Beauty Contest** game (guess 2/3 of the average). Play solo against bots or multiplayer with friends in a room.
+A web-based implementation of the **Beauty Contest** game (guess 2/3 of the average). Play solo against bots or multiplayer with friends in a room.
 
-This branch is a functionally equivalent port of the original Python/FastAPI backend to **PHP** so it can be deployed as a PHP project, while keeping the same React frontend and gameplay behavior.
+This branch ports the original Python/FastAPI backend to **PHP** and uses an **HTTP polling + MySQL** architecture for multiplayer so it can run on typical shared hosting (e.g. Hostinger Premium) without a long-running WebSocket process.
 
 ## How to Play
 
@@ -18,37 +18,43 @@ This branch is a functionally equivalent port of the original Python/FastAPI bac
 
 ## Features
 
-- **Single player:** play locally against 1–9 AI opponents.
-- **Multiplayer rooms:** create/join rooms via room code over WebSockets, with host-controlled rounds.
+- **Single player:** play locally in the browser against 1–9 AI opponents (no backend required).
+- **Multiplayer rooms:** create/join rooms via room code over HTTP polling (`/api`) with state stored in MySQL.
 - **Session persistence:** multiplayer sessions can rejoin after a refresh.
 - **Round history & scoreboard:** per-round picks, averages/targets, logs, and live scores.
-- **Light/dark mode** and an in-app "How to Play" guide on the main screen.
+- **Light/dark mode** and in-app "How to Play" / tips.
 
 ## Project Structure
 
-- `backend_php/` — PHP WebSocket server (Ratchet/ReactPHP) and game logic.
-  - `server.php` — WebSocket server, message handling, and timers (pick timeout / ready auto-next).
-  - `room_manager.php` — rooms, sessions, round flow, and state snapshots.
-  - `game_logic.php` — core Beauty Contest rules and scoring.
-  - `config.php` — game constants.
-  - `composer.json` — PHP dependencies.
+- `backend_php/` — PHP multiplayer backend (stateless HTTP API + MySQL) and game logic.
+  - `api.php` — API router (`/api/room/*`, `/api/game/*`, `/api/room/state`).
+  - `game_service.php` — room lifecycle, polling state snapshots, and deadline-based timers (pick/ready).
+  - `game_logic.php` — core Beauty Contest rules and scoring (banker's rounding, same behavior).
+  - `db.php` — PDO connection helper.
+  - `config.php` — game constants and DB configuration (`DB_*` env vars).
+  - `schema.sql` — MySQL schema (rooms, participants, submissions, readies, history).
+  - `composer.json` — PHP dependencies (autoload).
+  - `server.php`, `room_manager.php` — legacy WebSocket/Ratchet implementation (kept for reference; not used by the HTTP+MySQL flow).
 - `backend/` — original Python backend (kept for reference).
 - `frontend/` — React (Vite) + Tailwind CSS client (`src/App.jsx`, `src/gameLogic.js`).
-- `index.php` — PHP front controller to serve the built SPA from `frontend/dist`.
-- `.htaccess` — rewrite rules for SPA routing on Apache/PHP hosts.
-- `run_php.php` — convenience script to start PHP WS backend + PHP static frontend server.
+- `index.php` — front controller: serves the built SPA from `frontend/dist`, routes `/api/*` to the backend.
+- `.htaccess` — rewrites `/api/*` to `backend_php/api.php` and falls back SPA routes to `index.php` (Apache/LiteSpeed).
+- `run_php.php` — convenience script to run the built app + API locally via PHP's built-in server.
 - `run.py` — original Python/Node convenience script.
 
-## Run Locally (PHP)
+## Run Locally
 
-**Prerequisites:** PHP 8.1+ with Composer, and Node.js/npm (to build the frontend assets).
+**Prerequisites:** PHP 8.1+ (with `pdo_mysql` and `json`), Composer, Node.js/npm, and a MySQL/MariaDB database (required for multiplayer).
 
-### 1. Install PHP backend dependencies
+### 1. Create database and configure
+
+Create a database and import the schema:
 
 ```bash
-cd backend_php
-composer install
+mysql -u <user> -p <database> < backend_php/schema.sql
 ```
+
+Configure DB credentials in `backend_php/config.php` or via environment variables: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS` (defaults: host `127.0.0.1`, port `3306`, db `beautycontest`, user `root`, empty password).
 
 ### 2. Build the frontend
 
@@ -58,14 +64,9 @@ npm install --include=dev
 npm run build
 ```
 
-For local use, the frontend defaults to `ws://localhost:8000/ws` when running on localhost. For deployed builds, set `VITE_WS_URL` to your PHP WebSocket endpoint before building (e.g. `wss://<your-ws-host>/ws`):
+Multiplayer API calls are same-origin (`/api`) by default, so no extra build-time URL is required for typical deployments. To point at a different API origin, set `VITE_API_BASE` before building.
 
-```bash
-# example
-VITE_WS_URL=wss://your-ws-host/ws npm run build
-```
-
-### 3. Start the PHP servers
+### 3. Start the app
 
 From the project root:
 
@@ -73,21 +74,23 @@ From the project root:
 php run_php.php
 ```
 
-- WebSocket backend: `ws://localhost:8000` (accepts `/ws`, same protocol as original)
-- Frontend (built SPA): http://localhost:5173
+- App + API: http://localhost:5173 (serves `frontend/dist` and `/api`)
 
-Open the frontend URL, choose Single Player or Multiplayer, and start playing. Press `Ctrl+C` to stop.
+Open the URL, choose Single Player or Multiplayer, and start playing. Press `Ctrl+C` to stop. (Single Player works without a database; Multiplayer requires the configured database.)
 
-## Deployment (PHP)
+## Deployment (Hostinger Premium / shared hosting)
 
-- **Frontend/static SPA:** deploy the project on a PHP-capable web server with the document root at the project root (or route all non-file requests to `index.php`). `index.php` serves files from `frontend/dist` with SPA fallback. Ensure `frontend/dist` is built with the correct `VITE_WS_URL`.
-- **WebSocket backend:** run the Ratchet server as a long-running PHP process on a host that supports persistent processes (VPS/container/PaaS with worker support):
+This architecture is designed for shared hosting: static SPA + PHP endpoints + MySQL (no persistent process, no custom port).
 
-  ```bash
-  cd backend_php && composer install
-  php server.php
-  ```
+1. **Database:** create a MySQL database/user in hPanel and import `backend_php/schema.sql`.
+2. **Configure:** set DB credentials via environment variables (`DB_HOST/DB_NAME/DB_USER/DB_PASS`) or edit `backend_php/config.php`.
+3. **Build:** `cd frontend && npm install --include=dev && npm run build` (same-origin `/api`, so `VITE_API_BASE` usually not needed).
+4. **Upload** to your domain root (e.g. `public_html`):
+   - `index.php`, `.htaccess`
+   - `frontend/dist/` (built assets)
+   - `backend_php/` (`api.php`, `game_service.php`, `game_logic.php`, `db.php`, `config.php`, `schema.sql`)
+   (You do not need `node_modules`, frontend source, or the legacy `server.php`/`room_manager.php` in production.)
+5. **hPanel:** set PHP 8.1+ for the domain and ensure `.htaccess` rewrites are enabled (default). Enable SSL.
+6. **Test:** open the domain. Single Player runs in-browser; Multiplayer uses `/api` with MySQL state, polling, and DB-stored deadlines for pick/ready timers.
 
-  It listens on port `8000` by default, or the `$PORT` environment variable if provided.
-
-- The WebSocket protocol and game behavior (rules, scoring, timers, history, session rejoin, etc.) match the original implementation. Single-player mode in the UI runs locally in the browser (same as original) and does not require the backend.
+The legacy WebSocket backend (`backend_php/server.php`) remains in the repo for reference but is not required for this deployment model.

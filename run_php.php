@@ -1,71 +1,40 @@
 <?php
-// Convenience script to start the PHP WebSocket backend and the built frontend (static) server.
+// Convenience script to run the app locally (built SPA + HTTP API).
 // Usage: php run_php.php
-// - WebSocket backend: ws://localhost:8000 (Ratchet)
-// - Frontend (built SPA): http://localhost:5173 (served via PHP built-in server + index.php)
-// Make sure you've run: composer install (in backend_php/) and built frontend into frontend/dist.
+// Serves frontend/dist and /api via root index.php on PHP's built-in server.
+// Prereqs: build frontend (cd frontend && npm run build). For multiplayer, configure MySQL
+// in backend_php/config.php (or DB_* env vars) and import backend_php/schema.sql.
 
 $root = __DIR__;
-$backend = $root . '/backend_php';
-
-$procs = [];
-$pipesList = [];
-
-function is_windows(): bool {
-    return strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
-}
-
-function cleanup($procs) {
-    foreach ($procs as $p) {
-        if (is_resource($p)) {
-            @proc_terminate($p);
-        }
-    }
-}
-
 $php = PHP_BINARY ?: 'php';
 
-// Backend WS server
-$backendCmd = escapeshellarg($php) . ' ' . escapeshellarg($backend . '/server.php');
-$descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-$backendProc = proc_open($backendCmd, $descriptors, $pipes, $backend, null);
-if (!is_resource($backendProc)) {
-    fwrite(STDERR, "Failed to start backend server. Make sure dependencies are installed: cd backend_php && composer install\n");
+$dist = $root . '/frontend/dist/index.html';
+if (!is_file($dist)) {
+    fwrite(STDERR, "Warning: frontend/dist not found. Build first: cd frontend && npm install --include=dev && npm run build\n\n");
+}
+
+$descriptors = [0 => STDIN, 1 => STDOUT, 2 => STDERR];
+$cmd = escapeshellarg($php) . ' -S 0.0.0.0:5173 ' . escapeshellarg($root . '/index.php');
+$proc = proc_open($cmd, $descriptors, $pipes, $root, null);
+if (!is_resource($proc)) {
+    fwrite(STDERR, "Failed to start PHP dev server.\n");
     exit(1);
 }
-$procs[] = $backendProc;
-foreach ($pipes as $p) { stream_set_blocking($p, false); }
 
-// Frontend static server (serves built SPA via root index.php router)
-$frontendCmd = escapeshellarg($php) . ' -S 0.0.0.0:5173 ' . escapeshellarg($root . '/index.php');
-$frontendProc = proc_open($frontendCmd, $descriptors, $pipes2, $root, null);
-if (!is_resource($frontendProc)) {
-    fwrite(STDERR, "Failed to start frontend server.\n");
-    cleanup($procs);
-    exit(1);
-}
-$procs[] = $frontendProc;
-foreach ($pipes2 as $p) { stream_set_blocking($p, false); }
-
-echo "Backend WS: http://localhost:8000 (ws://localhost:8000)\n";
-echo "Frontend:   http://localhost:5173 (serves frontend/dist via index.php)\n";
+echo "App running at: http://localhost:5173\n";
+echo "Single Player works without a database. Multiplayer requires a configured MySQL database.\n";
 echo "Press Ctrl+C to stop.\n";
 
 if (function_exists('pcntl_async_signals')) {
     pcntl_async_signals(true);
-    $handler = function () use ($procs) { cleanup($procs); exit(0); };
+    $handler = function () use ($proc) {
+        if (is_resource($proc)) { @proc_terminate($proc); }
+        exit(0);
+    };
     pcntl_signal(SIGINT, $handler);
     pcntl_signal(SIGTERM, $handler);
 }
 
-while (true) {
-    foreach ($procs as $p) {
-        $status = proc_get_status($p);
-        if (!$status['running']) {
-            echo "\nA process exited. Stopping...\n";
-            cleanup($procs);
-            exit(0);
-        }
-    }
-    usleep(200000);
-}
+$code = proc_close($proc);
+exit(is_int($code) ? $code : 0);
+
